@@ -6,6 +6,8 @@ from app.modules.auth.schemas import UserCreate, UserLogin, Token, RegisterOwner
 from app.modules.tenants.service import TenantService
 from app.modules.tenants.schemas import TenantCreate
 from app.modules.tenants.models import Tenant
+from app.modules.agencies.models import Agency
+from app.modules.clients.models import Client
 from app.config import settings
 from app.utils.validators import validate_email, validate_password
 from fastapi import HTTPException, status
@@ -84,7 +86,22 @@ class AuthService:
             slug=owner_data.tenant_slug
         )
         tenant = TenantService.create_tenant(db, tenant_data)
-        
+
+        # Create agency for this tenant (Milestone 2 multi-tenant)
+        agency = Agency(
+            tenant_id=tenant.id,
+            name=tenant.name,
+            slug=tenant.slug,
+            is_active=True,
+        )
+        db.add(agency)
+        db.flush()
+
+        # Create default client for agency
+        client = Client(agency_id=agency.id, name=f"{tenant.name} - Default", is_active=True)
+        db.add(client)
+        db.flush()
+
         # Create owner user with ADMIN role
         hashed_password = get_password_hash(owner_data.password)
         user = User(
@@ -92,12 +109,13 @@ class AuthService:
             hashed_password=hashed_password,
             full_name=owner_data.full_name,
             role=UserRole.ADMIN,
-            tenant_id=tenant.id
+            tenant_id=tenant.id,
+            agency_id=agency.id,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
-        
+
         return user, tenant
     
     @staticmethod

@@ -3,7 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.modules.auth.router import router as auth_router
 from app.modules.tenants.router import router as tenants_router
+from app.modules.agencies.router import router as agencies_router
+from app.modules.clients.router import router as clients_router
 from app.modules.campaigns.router import router as campaigns_router
+from app.modules.posts.router import router as posts_router
 from app.modules.social.router import router as social_router
 from app.modules.stripe.router import router as stripe_router
 from app.modules.scheduler.router import router as scheduler_router
@@ -54,7 +57,10 @@ app.add_middleware(
 # Include routers
 app.include_router(auth_router, prefix="/api")
 app.include_router(tenants_router, prefix="/api")
+app.include_router(agencies_router, prefix="/api")
+app.include_router(clients_router, prefix="/api")
 app.include_router(campaigns_router, prefix="/api")
+app.include_router(posts_router, prefix="/api")
 app.include_router(social_router, prefix="/api")
 app.include_router(stripe_router, prefix="/api")
 app.include_router(scheduler_router, prefix="/api")

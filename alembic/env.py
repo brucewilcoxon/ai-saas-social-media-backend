@@ -13,7 +13,9 @@ from app.config import settings
 # Import all models for Alembic autogenerate
 from app.modules.auth.models import User
 from app.modules.tenants.models import Tenant
-from app.modules.campaigns.models import Campaign, Post, Approval
+from app.modules.agencies.models import Agency
+from app.modules.clients.models import Client
+from app.modules.campaigns.models import Campaign, Post, MonthlyPlan, Approval
 from app.modules.social.models import SocialAccount
 from app.modules.stripe.models import Subscription
 from app.modules.scheduler.models import ScheduledPost

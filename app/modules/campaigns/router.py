@@ -1,15 +1,17 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.database import get_db
 from app.modules.campaigns.schemas import (
-    CampaignCreate, CampaignUpdate, CampaignResponse,
-    PostResponse, ApprovalCreate, ApprovalResponse
+    CampaignCreate,
+    CampaignUpdate,
+    CampaignResponse,
+    CampaignDetailResponse,
+    PostResponse,
 )
 from app.modules.campaigns.service import CampaignService
-from app.dependencies import get_current_user, get_current_tenant
+from app.dependencies import get_current_user, get_current_agency_id
 from app.modules.auth.models import User
-from app.modules.tenants.models import Tenant
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -19,33 +21,41 @@ def create_campaign(
     campaign_data: CampaignCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    current_tenant: Tenant = Depends(get_current_tenant)
+    agency_id: str = Depends(get_current_agency_id),
 ):
-    """Create a new campaign"""
+    """Create a new campaign for a client."""
     return CampaignService.create_campaign(
-        db, campaign_data, current_tenant.id, current_user.id
+        db, campaign_data, agency_id, current_user.id
     )
 
 
 @router.get("", response_model=List[CampaignResponse])
 def get_campaigns(
+    client_id: Optional[str] = Query(None),
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_tenant: Tenant = Depends(get_current_tenant)
+    agency_id: str = Depends(get_current_agency_id),
 ):
-    """Get all campaigns for current tenant"""
-    return CampaignService.get_campaigns(db, current_tenant.id, skip, limit)
+    """Get campaigns for the current agency, optionally filtered by client."""
+    return CampaignService.get_campaigns(db, agency_id, client_id=client_id, skip=skip, limit=limit)
 
 
-@router.get("/{campaign_id}", response_model=CampaignResponse)
+@router.get("/{campaign_id}", response_model=CampaignDetailResponse)
 def get_campaign(
     campaign_id: str,
     db: Session = Depends(get_db),
-    current_tenant: Tenant = Depends(get_current_tenant)
+    agency_id: str = Depends(get_current_agency_id),
 ):
-    """Get a specific campaign"""
-    return CampaignService.get_campaign(db, campaign_id, current_tenant.id)
+    """Get a campaign with agency and client names."""
+    campaign, agency_name, client_name = CampaignService.get_campaign_with_names(
+        db, campaign_id, agency_id
+    )
+    return CampaignDetailResponse(
+        **CampaignResponse.model_validate(campaign).model_dump(),
+        agency_name=agency_name,
+        client_name=client_name,
+    )
 
 
 @router.put("/{campaign_id}", response_model=CampaignResponse)
@@ -53,69 +63,41 @@ def update_campaign(
     campaign_id: str,
     campaign_data: CampaignUpdate,
     db: Session = Depends(get_db),
-    current_tenant: Tenant = Depends(get_current_tenant)
+    agency_id: str = Depends(get_current_agency_id),
 ):
-    """Update a campaign"""
-    return CampaignService.update_campaign(
-        db, campaign_id, current_tenant.id, campaign_data
-    )
+    """Update a campaign."""
+    return CampaignService.update_campaign(db, campaign_id, agency_id, campaign_data)
 
 
 @router.post("/{campaign_id}/generate-plan", response_model=CampaignResponse)
-def generate_ai_plan(
-    campaign_id: int,
+def generate_plan(
+    campaign_id: str,
     db: Session = Depends(get_db),
-    current_tenant: Tenant = Depends(get_current_tenant)
+    agency_id: str = Depends(get_current_agency_id),
 ):
-    """Generate AI plan for campaign"""
-    return CampaignService.generate_ai_plan(db, campaign_id, current_tenant.id)
+    """Generate AI monthly plan (4 weeks, 2-3 posts per week)."""
+    return CampaignService.generate_plan(db, campaign_id, agency_id)
 
 
-@router.post("/{campaign_id}/approve-plan", response_model=ApprovalResponse)
+@router.post("/{campaign_id}/approve-plan", response_model=CampaignResponse)
 def approve_plan(
-    campaign_id: int,
-    approved: bool,
-    comments: str = None,
+    campaign_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    current_tenant: Tenant = Depends(get_current_tenant)
+    agency_id: str = Depends(get_current_agency_id),
 ):
-    """Approve or reject AI plan"""
-    return CampaignService.approve_plan(
-        db, campaign_id, current_tenant.id, current_user.id, approved, comments
-    )
-
-
-@router.post("/{campaign_id}/generate-posts", response_model=List[PostResponse])
-def generate_posts(
-    campaign_id: int,
-    db: Session = Depends(get_db),
-    current_tenant: Tenant = Depends(get_current_tenant)
-):
-    """Generate posts from approved plan"""
-    return CampaignService.generate_posts(db, campaign_id, current_tenant.id)
+    """Approve the monthly plan; all posts marked approved and editing locked."""
+    return CampaignService.approve_plan(db, campaign_id, agency_id)
 
 
 @router.get("/{campaign_id}/posts", response_model=List[PostResponse])
-def get_posts(
-    campaign_id: int,
+def get_campaign_posts(
+    campaign_id: str,
     db: Session = Depends(get_db),
-    current_tenant: Tenant = Depends(get_current_tenant)
+    agency_id: str = Depends(get_current_agency_id),
 ):
-    """Get all posts for a campaign"""
-    return CampaignService.get_posts(db, campaign_id, current_tenant.id)
+    """Get all posts for a campaign (grouped by week in service)."""
+    posts = CampaignService.get_posts_by_campaign(db, campaign_id, agency_id)
+    return [PostResponse.model_validate(p) for p in posts]
 
 
-@router.post("/posts/{post_id}/approve", response_model=ApprovalResponse)
-def approve_post(
-    post_id: int,
-    approved: bool,
-    comments: str = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    current_tenant: Tenant = Depends(get_current_tenant)
-):
-    """Approve or reject a post"""
-    return CampaignService.approve_post(
-        db, post_id, current_tenant.id, current_user.id, approved, comments
-    )
+# Legacy endpoints (optional): generate-posts, approve-post - can be removed or kept for backward compat

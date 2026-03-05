@@ -65,6 +65,16 @@ def get_current_tenant(
     return tenant
 
 
+def get_current_agency_id(current_user: User = Depends(get_current_user)) -> str:
+    """Get current user's agency id for campaign/client scoping."""
+    if not current_user.agency_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User has no agency assigned",
+        )
+    return current_user.agency_id
+
+
 def require_role(allowed_roles: list[str]):
     """Dependency factory for role-based access control"""
     def role_checker(current_user: User = Depends(get_current_user)) -> User:

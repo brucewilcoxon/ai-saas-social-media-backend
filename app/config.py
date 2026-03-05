@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     INSTAGRAM_CLIENT_SECRET: str = ""
     
     # AI Service
+    AI_PROVIDER: str = "openai"  # openai, anthropic, or empty for mock
     AI_API_KEY: str = ""
     AI_API_URL: str = "https://api.openai.com/v1"
     

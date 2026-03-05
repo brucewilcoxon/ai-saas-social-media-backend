@@ -23,7 +23,9 @@ class User(Base):
     role = Column(Enum(UserRole), default=UserRole.EDITOR, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     tenant_id = Column(CHAR(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    agency_id = Column(CHAR(36), ForeignKey("agencies.id"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     tenant = relationship("Tenant", back_populates="users")
+    agency = relationship("Agency", back_populates="users")
