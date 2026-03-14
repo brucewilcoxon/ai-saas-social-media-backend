@@ -6,7 +6,14 @@ from app.modules.campaigns.models import (
     CampaignStatus,
     PostStatus,
 )
-from app.modules.campaigns.schemas import CampaignCreate, CampaignUpdate
+from app.modules.campaigns.schemas import (
+    CampaignCreate,
+    CampaignUpdate,
+    CampaignResponse,
+    MonthlyPlanResponse,
+    MonthlyPlanPost,
+    GeneratePlanResponse,
+)
 from app.modules.ai.service import AIService, validate_content_language
 from app.modules.clients.models import Client
 from app.modules.agencies.models import Agency
@@ -29,6 +36,50 @@ def _ensure_client_in_agency(db: Session, client_id: str, agency_id: str) -> Cli
 
 
 class CampaignService:
+    @staticmethod
+    def get_plan(
+        db: Session,
+        campaign_id: str,
+        agency_id: str,
+    ) -> "GetPlanResponse":
+        """
+        Return the existing monthly plan (if any) for a campaign.
+        If no plan exists yet, returns plan=null to match frontend's GetPlanResponse.
+        """
+        campaign = CampaignService.get_campaign(db, campaign_id, agency_id)
+        # Assume at most one monthly plan per campaign.
+        plan = (
+            db.query(MonthlyPlan)
+            .filter(MonthlyPlan.campaign_id == campaign.id)
+            .first()
+        )
+        if not plan:
+            from app.modules.campaigns.schemas import GetPlanResponse  # local import to avoid cycle
+
+            return GetPlanResponse(plan=None)
+
+        posts = sorted(plan.posts, key=lambda p: (p.week_number, p.id))
+        from app.modules.campaigns.schemas import MonthlyPlanPost, MonthlyPlanResponse, GetPlanResponse  # local import
+
+        plan_schema = MonthlyPlanResponse(
+            id=plan.id,
+            campaign_id=plan.campaign_id,
+            posts=[
+                MonthlyPlanPost(
+                    id=p.id,
+                    week_number=p.week_number,
+                    title=p.title,
+                    content=p.content,
+                    platform=p.platform,
+                    status=p.status,
+                )
+                for p in posts
+            ],
+            created_at=plan.created_at,
+            updated_at=plan.updated_at,
+        )
+        return GetPlanResponse(plan=plan_schema)
+
     @staticmethod
     def create_campaign(
         db: Session,
@@ -123,7 +174,11 @@ class CampaignService:
         return campaign
 
     @staticmethod
-    def generate_plan(db: Session, campaign_id: str, agency_id: str) -> Campaign:
+    def generate_plan(
+        db: Session,
+        campaign_id: str,
+        agency_id: str,
+    ) -> GeneratePlanResponse:
         campaign = CampaignService.get_campaign(db, campaign_id, agency_id)
         if campaign.status != CampaignStatus.DRAFT:
             raise HTTPException(
@@ -146,8 +201,11 @@ class CampaignService:
         plan = MonthlyPlan(campaign_id=campaign.id)
         db.add(plan)
         db.flush()
+        # Resolve tenant_id for posts via campaign -> client -> agency.
+        tenant_id = campaign.client.agency.tenant_id  # type: ignore[assignment]
         for p in raw_posts:
             post = Post(
+                tenant_id=tenant_id,
                 monthly_plan_id=plan.id,
                 week_number=p.get("week_number", 1),
                 title=p.get("title"),
@@ -159,7 +217,32 @@ class CampaignService:
         campaign.status = CampaignStatus.PLANNING_GENERATED
         db.commit()
         db.refresh(campaign)
-        return campaign
+        db.refresh(plan)
+        plan_posts = sorted(plan.posts, key=lambda p: (p.week_number, p.id))
+        campaign_schema = CampaignResponse.model_validate(campaign)
+        plan_schema = MonthlyPlanResponse(
+            id=plan.id,
+            campaign_id=plan.campaign_id,
+            posts=[
+                MonthlyPlanPost(
+                    id=p.id,
+                    week_number=p.week_number,
+                    title=p.title,
+                    content=p.content,
+                    platform=p.platform,
+                    status=p.status,
+                )
+                for p in plan_posts
+            ],
+            created_at=plan.created_at,
+            updated_at=plan.updated_at,
+        )
+        # Backend currently always uses mock generator (see AIService.generate_monthly_plan_posts).
+        return GeneratePlanResponse(
+            campaign=campaign_schema,
+            plan=plan_schema,
+            generation_mode="mock",
+        )
 
     @staticmethod
     def approve_plan(

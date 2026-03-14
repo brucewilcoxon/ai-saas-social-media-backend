@@ -73,6 +73,7 @@ class Post(Base):
     __tablename__ = "posts"
 
     id = Column(CHAR(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(CHAR(36), ForeignKey("tenants.id"), nullable=False, index=True)
     monthly_plan_id = Column(
         CHAR(36), ForeignKey("monthly_plans.id"), nullable=False, index=True
     )
