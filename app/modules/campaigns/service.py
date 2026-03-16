@@ -27,7 +27,10 @@ from app.modules.campaigns.schemas import (
     CampaignResponse,
     MonthlyPlanResponse,
     MonthlyPlanPost,
+    GeneratePlanRequest,
     GeneratePlanResponse,
+    GenerationOptions,
+    resolve_generation_options,
 )
 from app.modules.ai.service import AIService, validate_content_language
 from app.modules.clients.models import Client
@@ -92,6 +95,7 @@ class CampaignService:
             ],
             created_at=plan.created_at,
             updated_at=plan.updated_at,
+            generation_config=plan.generation_config,
         )
         return GetPlanResponse(plan=plan_schema)
 
@@ -196,6 +200,7 @@ class CampaignService:
         db: Session,
         campaign_id: str,
         agency_id: str,
+        request: Optional[GeneratePlanRequest] = None,
     ) -> GeneratePlanResponse:
         """
         Generate or regenerate the AI monthly plan for a campaign.
@@ -203,6 +208,8 @@ class CampaignService:
         existing MonthlyPlan(s) and their Post rows are deleted (cascade), then
         a new plan and posts are created. Only one active plan per campaign;
         GET plan and GET posts therefore return only the latest plan.
+        Optional request body provides generation parameters; defaults used when omitted.
+        Regeneration is blocked after approval (PLANNING_APPROVED and beyond); use reset_plan first.
         """
         campaign = CampaignService.get_campaign(db, campaign_id, agency_id)
         if campaign.status not in ALLOWED_PLAN_GENERATION_STATUSES:
@@ -210,6 +217,7 @@ class CampaignService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Approved planning cannot be regenerated directly. Reset or reopen planning first.",
             )
+        options = resolve_generation_options(request, campaign.language)
         # Full replacement: delete existing plan(s) and their posts (cascade); old data is removed, not archived.
         for existing_plan in list(campaign.monthly_plans):
             db.delete(existing_plan)
@@ -218,7 +226,7 @@ class CampaignService:
             raw_posts = AIService.generate_monthly_plan_posts(
                 campaign_name=campaign.name,
                 description=campaign.description or "",
-                language=campaign.language,
+                options=options,
             )
         except ValueError as e:
             raise HTTPException(
@@ -226,13 +234,22 @@ class CampaignService:
                 detail=str(e),
             )
         for p in raw_posts:
-            validate_content_language(p.get("content", ""), campaign.language)
-        plan = MonthlyPlan(campaign_id=campaign.id)
+            validate_content_language(p.get("content", ""), options.language)
+        # Store generation config for audit/debugging
+        generation_config = options.model_dump()
+        plan = MonthlyPlan(campaign_id=campaign.id, generation_config=generation_config)
         db.add(plan)
         db.flush()
         # Resolve tenant_id for posts via campaign -> client -> agency.
         tenant_id = campaign.client.agency.tenant_id  # type: ignore[assignment]
         for p in raw_posts:
+            extra = {}
+            if p.get("hashtags") is not None:
+                extra["hashtags"] = p["hashtags"] if isinstance(p["hashtags"], list) else []
+            if p.get("link") is not None and str(p.get("link", "")).strip():
+                extra["link"] = str(p.get("link", "")).strip()
+            if p.get("campaign_goal_tag") is not None:
+                extra["campaign_goal_tag"] = str(p.get("campaign_goal_tag", ""))
             post = Post(
                 tenant_id=tenant_id,
                 campaign_id=campaign.id,
@@ -242,6 +259,7 @@ class CampaignService:
                 content=p.get("content", ""),
                 platform=p.get("platform"),
                 status=PostStatus.GENERATED,
+                extra_data=extra if extra else None,
             )
             db.add(post)
         campaign.status = CampaignStatus.PLANNING_GENERATED
@@ -266,6 +284,7 @@ class CampaignService:
             ],
             created_at=plan.created_at,
             updated_at=plan.updated_at,
+            generation_config=plan.generation_config,
         )
         # Backend currently always uses mock generator (see AIService.generate_monthly_plan_posts).
         return GeneratePlanResponse(

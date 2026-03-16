@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.database import get_db
@@ -9,6 +9,7 @@ from app.modules.campaigns.schemas import (
     CampaignDetailResponse,
     PostResponse,
     GetPlanResponse,
+    GeneratePlanRequest,
     GeneratePlanResponse,
 )
 from app.modules.campaigns.service import CampaignService
@@ -84,11 +85,12 @@ def get_plan(
 @router.post("/{campaign_id}/generate-plan", response_model=GeneratePlanResponse)
 def generate_plan(
     campaign_id: str,
+    body: Optional[GeneratePlanRequest] = Body(None),
     db: Session = Depends(get_db),
     agency_id: str = Depends(get_current_agency_id),
 ):
-    """Generate or regenerate AI monthly plan (4 weeks, 2-3 posts per week). Returns campaign + plan."""
-    return CampaignService.generate_plan(db, campaign_id, agency_id)
+    """Generate or regenerate AI monthly plan (4 weeks, configurable posts per week/channels). Optional body for generation options."""
+    return CampaignService.generate_plan(db, campaign_id, agency_id, body)
 
 
 @router.post("/{campaign_id}/approve-plan", response_model=CampaignResponse)

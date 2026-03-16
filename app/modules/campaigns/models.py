@@ -56,12 +56,13 @@ class Campaign(Base):
 
 
 class MonthlyPlan(Base):
-    """One plan per campaign (4 weeks)."""
+    """One plan per campaign (4 weeks). Stores generation config used for audit/debugging."""
 
     __tablename__ = "monthly_plans"
 
     id = Column(CHAR(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     campaign_id = Column(CHAR(36), ForeignKey("campaigns.id"), nullable=False, index=True)
+    generation_config = Column(JSON, nullable=True)  # config used to generate this plan (posts_per_week, channels, etc.)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
